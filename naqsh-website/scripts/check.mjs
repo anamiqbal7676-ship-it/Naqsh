@@ -1,0 +1,31 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const dist=path.join(root,'dist');
+const read=name=>fs.readFileSync(path.join(dist,name),'utf8');
+const html=read('index.html'),app=read('app.js'),css=read('style.css'),data=read('data.js');
+new vm.Script(app,{filename:'app.js'});
+const model=vm.runInNewContext(`${data}\n({artists,works})`);
+assert.equal(model.artists.length,6,'Expected six artist profiles');
+assert.equal(model.works.length,24,'Expected 24 retained artwork images');
+assert(!fs.existsSync(path.join(dist,'assets/art-00.webp')),'Removed image must stay excluded');
+const references=new Set(model.artists.map(a=>a.portrait));
+model.works.forEach(w=>references.add(w.src));
+for(const m of html.matchAll(/(?:src|href)="([^"#]+)"/g))if(!m[1].startsWith('http'))references.add(m[1]);
+for(const m of read('assets/fonts.css').matchAll(/url\(([^)]+)\)/g))references.add('assets/'+m[1].replace(/^\.\//,''));
+for(const m of app.matchAll(/\[([\d,]+)\]\.map\(n=>/g))for(const n of m[1].split(','))references.add(`assets/art-${n.padStart(2,'0')}.webp`);
+for(const reference of references){assert(!reference.includes('art-00.webp'),'Removed image is referenced');const file=path.resolve(dist,reference);assert(file.startsWith(dist+path.sep),'Asset escapes the site directory');assert(fs.existsSync(file),`Missing: ${reference}`);assert(fs.statSync(file).size>0,`Empty: ${reference}`)}
+for(const [name,contents] of [['HTML',html],['CSS',css],['JavaScript',app],['Data',data]])assert(!/(?:\/workspace\/|terminal\.local|blob:|file:\/\/)/.test(contents),`${name} contains a temporary/local-only path`);
+assert(css.includes('@keyframes ribbon-right'),'Image-strip animation is missing');
+assert(app.includes('requestAnimationFrame(tick)'),'Dome animation is missing');
+assert(app.includes('lightbox.showModal()'),'Artwork viewer is missing');
+for(const a of model.artists){assert(a.art.length===4,`${a.name} must retain four collection images`);assert(a.source.startsWith('https://'),'Invalid source link')}
+const vercel=JSON.parse(fs.readFileSync(path.join(root,'vercel.json'),'utf8'));
+assert.equal(vercel.outputDirectory,'dist');
+assert.equal(vercel.framework,null);
+const images=fs.readdirSync(path.join(dist,'assets')).filter(x=>x.endsWith('.webp'));
+const fonts=fs.readdirSync(path.join(dist,'assets')).filter(x=>x.endsWith('.ttf'));
+console.log(`PASS: six profiles, ${model.works.length} artworks, ${images.length} bundled images, ${fonts.length} local fonts, asset references, JavaScript syntax, animation/viewer hooks, and Vercel configuration.`);

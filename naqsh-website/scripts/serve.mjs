@@ -1,0 +1,15 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import {fileURLToPath} from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../dist');
+const args=process.argv.slice(2);
+const option=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1]};
+const port=Number(option('--port')||process.env.PORT||3000);
+const host=option('--host')||process.env.HOST||'0.0.0.0';
+if(!Number.isInteger(port)||port<1||port>65535)throw new Error('Choose a port between 1 and 65535.');
+const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.webp':'image/webp','.ttf':'font/ttf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.svg':'image/svg+xml'};
+const server=http.createServer((req,res)=>{try{const pathname=decodeURIComponent(new URL(req.url,'http://local').pathname);const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end('Forbidden');return}if(!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);res.end('Not found');return}res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'});if(req.method==='HEAD'){res.end();return}fs.createReadStream(file).pipe(res)}catch{res.writeHead(400);res.end('Bad request')}});
+server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`Port ${port} is busy. Run: npm run dev -- --port ${port+1}`:e.message);process.exit(1)});
+server.listen(port,host,()=>{console.log(`Naqsh is ready. Open http://localhost:${port}`);if(host==='0.0.0.0')for(const items of Object.values(os.networkInterfaces()))for(const address of items||[])if(address.family==='IPv4'&&!address.internal)console.log(`Network: http://${address.address}:${port}`);console.log('Press Ctrl+C to stop.');});
